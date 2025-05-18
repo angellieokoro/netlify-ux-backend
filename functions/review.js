@@ -1,78 +1,76 @@
-import fetch from 'node-fetch';
+// netlify/functions/review.js
 
-exports.handler = async function(event, context) {
-  const { httpMethod, body } = event;
-
-  // CORS headers
+// Netlify Function entrypoint
+exports.handler = async (event, context) => {
+  // 1) Common headers for CORS
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json',
   };
 
-  // 1) Pre-flight CORS
-  if (httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers };
-  }
-
-  // 2) Simple GET health‐check
-  if (httpMethod === 'GET') {
+  // 2) Preflight
+  if (event.httpMethod === 'OPTIONS') {
     return {
-      statusCode: 200,
+      statusCode: 204,
       headers,
-      body: JSON.stringify({ ok: true, message: 'Review function is live' }),
+      body: '',
     };
   }
 
-  // 3) POST handler from Figma plugin
-  if (httpMethod === 'POST') {
+  // 3) Simple GET health-check
+  if (event.httpMethod === 'GET') {
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        ok: true,
+        message: 'Review endpoint is live',
+      }),
+    };
+  }
+
+  // 4) POST: run your AI review
+  if (event.httpMethod === 'POST') {
+    let payload;
     try {
-      const { appFocus, reviewFocus, frames } = JSON.parse(body);
-      const FIGMA_FILE_ID = process.env.FIGMA_FILE_ID;
-      const FIGMA_TOKEN   = process.env.FIGMA_TOKEN;
-      const OPENAI_KEY    = process.env.OPENAI_API_KEY;
+      payload = JSON.parse(event.body);
+    } catch (err) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: 'Invalid JSON body' }),
+      };
+    }
 
-      // (Optional) Fetch Figma file JSON for context
-      const figmaResp = await fetch(
-        `https://api.figma.com/v1/files/${FIGMA_FILE_ID}`,
-        { headers: { 'X-FIGMA-TOKEN': FIGMA_TOKEN } }
-      );
-      const figmaJson = await figmaResp.json();
+    const { appFocus, reviewFocus, frames } = payload;
 
-      // Call OpenAI
-      const openaiResp = await fetch(
-        'https://api.openai.com/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${OPENAI_KEY}`,
-            'Content-Type':  'application/json',
-          },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              {
-                role: "system",
-                content:
-                  "You are a Figma-savvy UX engineer. Given an app goal, a review focus, and a list of frame names, return JSON suggestions:\n" +
-                  "[{ frameId:string, actions:[{type, target, params}] }]",
-              },
-              {
-                role: "user",
-                content: JSON.stringify({ appFocus, reviewFocus, frames }),
-              },
-            ],
-          }),
-        }
-      );
-      const { choices } = await openaiResp.json();
-      const suggestions = JSON.parse(choices[0].message.content);
+    try {
+      // Example: call your OpenAI backend (replace URL if you use Netlify Env var)
+      const AI_ENDPOINT = process.env.AI_ENDPOINT_URL; 
+      const AI_KEY      = process.env.AI_API_KEY;
 
+      const aiRes = await fetch(AI_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${AI_KEY}`,
+        },
+        body: JSON.stringify({ appFocus, reviewFocus, frames }),
+      });
+      if (!aiRes.ok) {
+        throw new Error(`AI API returned ${aiRes.status}`);
+      }
+      const suggestions = await aiRes.json();
+
+      // 5) Return the suggestions
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify(suggestions),
       };
+
     } catch (err) {
       console.error('Review function error:', err);
       return {
@@ -83,11 +81,11 @@ exports.handler = async function(event, context) {
     }
   }
 
-  // 4) Method not allowed
+  // 6) Method not allowed
   return {
     statusCode: 405,
     headers,
-    body: 'Method Not Allowed',
+    body: JSON.stringify({ error: 'Method Not Allowed' }),
   };
 };
 
