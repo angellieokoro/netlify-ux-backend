@@ -1,93 +1,58 @@
 // functions/review.js
 
-import { Handler } from '@netlify/functions'; // if using ES modules, otherwise use require
-import OpenAI from 'openai';
+// If you need OpenAI, make sure openai is in your dependencies 
+// and OPENAI_API_KEY is set in your Netlify site settings or .env.
+const { OpenAI } = require("openai");
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
 
-const handler = async (event, context) => {
-  // CORS headers
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
-
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers };
-  }
-
-  if (event.httpMethod === 'GET') {
+exports.handler = async function(event, context) {
+  // 1) Preflight
+  if (event.httpMethod === "OPTIONS") {
     return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ ok: true, message: 'Review endpoint is live' }),
+      statusCode: 204,
+      headers: CORS_HEADERS,
+      body: "",
     };
   }
 
-  if (event.httpMethod === 'POST') {
-    let body;
-    try {
-      body = JSON.parse(event.body || '{}');
-    } catch (err) {
-      return { statusCode: 400, headers, body: 'Invalid JSON' };
-    }
-
-    const { appFocus, reviewFocus, frames } = body;
-    if (!appFocus || !reviewFocus || !Array.isArray(frames)) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: 'Missing one of appFocus, reviewFocus, frames[]' }),
-      };
-    }
-
-    // Build your prompt for OpenAI
-    const systemPrompt = `
-You are a Figma Automation Assistant.
-App goal: ${appFocus}
-Review focus: ${reviewFocus}
-
-For each frame provided, output a JSON object:
-{ frameId: string, actions: Array<{ type: string, target: string, params: object }> }
-Only output valid JSON.
-`;
-    const userPrompt = `Frames:\n${JSON.stringify(frames, null, 2)}`;
-
-    try {
-      const resp = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.7,
-        max_tokens: 800,
-      });
-
-      // extract JSON from GPT reply
-      let text = resp.choices[0].message.content;
-      // remove ``` fences if present
-      text = text.replace(/```(?:json)?/, '').replace(/```$/, '').trim();
-
-      const suggestions = JSON.parse(text);
-      return {
-        statusCode: 200,
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify(suggestions),
-      };
-    } catch (err) {
-      console.error(err);
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: err.message }),
-      };
-    }
+  // 2) Simple GET sanity check
+  if (event.httpMethod === "GET") {
+    return {
+      statusCode: 200,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({
+        ok: true,
+        message: "Review endpoint is live",
+      }),
+    };
   }
 
-  return { statusCode: 405, headers, body: 'Method Not Allowed' };
+  // 3) POST → parse, (optionally call OpenAI), echo back
+  let body;
+  try {
+    body = JSON.parse(event.body || "{}");
+  } catch (err) {
+    return {
+      statusCode: 400,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({ ok: false, error: "Invalid JSON" }),
+    };
+  }
+
+  // **If** you want to call OpenAI here, e.g.:
+  // const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  // const aiRes = await client.chat.completions.create({ … });
+  // return { … body: JSON.stringify({ ok: true, data: aiRes }) };
+
+  // For now we just echo:
+  return {
+    statusCode: 200,
+    headers: CORS_HEADERS,
+    body: JSON.stringify({ ok: true, received: body }),
+  };
 };
-
-export { handler };
-
