@@ -1,78 +1,83 @@
-// netlify/functions/review.js
+// functions/review.js
 
-// Netlify Function entrypoint
-exports.handler = async (event, context) => {
-  // 1) Common headers for CORS
+import { Handler } from '@netlify/functions'; // if using ES modules, otherwise use require
+import OpenAI from 'openai';
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const handler = async (event, context) => {
+  // CORS headers
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json',
   };
 
-  // 2) Preflight
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 204,
-      headers,
-      body: '',
-    };
+    return { statusCode: 204, headers };
   }
 
-  // 3) Simple GET health-check
   if (event.httpMethod === 'GET') {
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({
-        ok: true,
-        message: 'Review endpoint is live',
-      }),
+      body: JSON.stringify({ ok: true, message: 'Review endpoint is live' }),
     };
   }
 
-  // 4) POST: run your AI review
   if (event.httpMethod === 'POST') {
-    let payload;
+    let body;
     try {
-      payload = JSON.parse(event.body);
+      body = JSON.parse(event.body || '{}');
     } catch (err) {
+      return { statusCode: 400, headers, body: 'Invalid JSON' };
+    }
+
+    const { appFocus, reviewFocus, frames } = body;
+    if (!appFocus || !reviewFocus || !Array.isArray(frames)) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: 'Invalid JSON body' }),
+        body: JSON.stringify({ error: 'Missing one of appFocus, reviewFocus, frames[]' }),
       };
     }
 
-    const { appFocus, reviewFocus, frames } = payload;
+    // Build your prompt for OpenAI
+    const systemPrompt = `
+You are a Figma Automation Assistant.
+App goal: ${appFocus}
+Review focus: ${reviewFocus}
+
+For each frame provided, output a JSON object:
+{ frameId: string, actions: Array<{ type: string, target: string, params: object }> }
+Only output valid JSON.
+`;
+    const userPrompt = `Frames:\n${JSON.stringify(frames, null, 2)}`;
 
     try {
-      // Example: call your OpenAI backend (replace URL if you use Netlify Env var)
-      const AI_ENDPOINT = process.env.AI_ENDPOINT_URL; 
-      const AI_KEY      = process.env.AI_API_KEY;
-
-      const aiRes = await fetch(AI_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${AI_KEY}`,
-        },
-        body: JSON.stringify({ appFocus, reviewFocus, frames }),
+      const resp = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 800,
       });
-      if (!aiRes.ok) {
-        throw new Error(`AI API returned ${aiRes.status}`);
-      }
-      const suggestions = await aiRes.json();
 
-      // 5) Return the suggestions
+      // extract JSON from GPT reply
+      let text = resp.choices[0].message.content;
+      // remove ``` fences if present
+      text = text.replace(/```(?:json)?/, '').replace(/```$/, '').trim();
+
+      const suggestions = JSON.parse(text);
       return {
         statusCode: 200,
-        headers,
+        headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify(suggestions),
       };
-
     } catch (err) {
-      console.error('Review function error:', err);
+      console.error(err);
       return {
         statusCode: 500,
         headers,
@@ -81,11 +86,8 @@ exports.handler = async (event, context) => {
     }
   }
 
-  // 6) Method not allowed
-  return {
-    statusCode: 405,
-    headers,
-    body: JSON.stringify({ error: 'Method Not Allowed' }),
-  };
+  return { statusCode: 405, headers, body: 'Method Not Allowed' };
 };
+
+export { handler };
 
