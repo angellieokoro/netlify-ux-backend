@@ -1,3 +1,6 @@
 [build]
   functions = "functions"
 
+[dev]
+  port = 9999           # or any free port you like
+  functions = "functions"  # ensure this points at your functions folder

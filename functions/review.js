@@ -1,28 +1,28 @@
-k/*  functions/review.js   – CommonJS, no @netlify/functions needed  */
+// functions/review.js  (CommonJS version – works out-of-the-box)
+
+// Only runtime deps you really need
 const OpenAI = require('openai');
 
-// CORS helper ----------------------------------------------------
-const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
-
+// Netlify passes the request as `event` (body is a string)
 exports.handler = async function (event /*, context */) {
-  // Pre-flight ----------------------------------------------------
+  // --- CORS pre-flight --------------------------------------------------
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers: cors };
+    return {
+      statusCode: 204,
+      headers: corsHeaders(),
+    };
   }
 
   try {
     const { appFocus, reviewFocus } = JSON.parse(event.body || '{}');
 
-    // real OpenAI call — requires env var OPENAI_API_KEY
+    // 🔑  REQUIRES env var OPENAI_API_KEY
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    /* -----------------------------------------------------------
-       Replace this demo array with the real openai response later
-    ------------------------------------------------------------*/
+    /* ---------------------------------------------------------------
+       👉  Your real prompt / chat completion goes here.
+       For demo we return two fake suggestions.
+    ----------------------------------------------------------------*/
     const suggestions = [
       {
         frameId: '123ABC',
@@ -42,15 +42,24 @@ exports.handler = async function (event /*, context */) {
 
     return {
       statusCode: 200,
-      headers: cors,
+      headers: corsHeaders(),
       body: JSON.stringify({ suggestions }),
     };
   } catch (err) {
     console.error(err);
     return {
       statusCode: 500,
-      headers: cors,
+      headers: corsHeaders(),
       body: JSON.stringify({ error: err.message }),
     };
   }
 };
+
+// helper so we don’t repeat ourselves
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
